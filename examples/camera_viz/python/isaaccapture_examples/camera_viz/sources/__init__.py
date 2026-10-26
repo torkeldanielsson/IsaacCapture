@@ -15,6 +15,7 @@ from ..pipeline import FrameSource
 
 from ._helpers import PairedFrameSource, set_notify_sink, set_verbose
 from .oakd import OakdSource
+from .oden import OdenSource
 from .rtp_h264 import RtpH264Source
 from .synthetic import SyntheticSource, SyntheticStereoSource
 from .v4l2 import V4l2Source
@@ -23,6 +24,7 @@ from .zed import ZedSource
 
 __all__ = [
     "OakdSource",
+    "OdenSource",
     "PairedFrameSource",
     "RtpH264Source",
     "SyntheticSource",
@@ -136,6 +138,30 @@ def build_local_camera(spec: dict) -> List[FrameSource]:
                 stereo=stereo,
             )
         ]
+    if kind == "oden":
+        # One Oden texture export per eye: ``share_path`` (left / mono) and
+        # ``share_path_right``, each the camera's width x height.
+        if stereo and "share_path_right" not in spec:
+            raise ValueError(
+                f"build_local_camera: oden camera {name!r} is stereo but has no "
+                "share_path_right (one Oden texture export per eye)"
+            )
+        width, height = int(spec["width"]), int(spec["height"])
+        left = OdenSource(
+            name=name,
+            share_path=spec.get("share_path", "/tmp/oden_0"),
+            width=width,
+            height=height,
+        )
+        if not stereo:
+            return [left]
+        right = OdenSource(
+            name=f"{name}_right",
+            share_path=spec["share_path_right"],
+            width=width,
+            height=height,
+        )
+        return [PairedFrameSource(name=name, left=left, right=right)]
     if kind == "zed":
         eyes = list(
             ZedSource.build(
@@ -158,5 +184,5 @@ def build_local_camera(spec: dict) -> List[FrameSource]:
         return eyes
     raise ValueError(
         f"build_local_camera: unknown camera type {kind!r} "
-        "(known: synthetic, v4l2, oakd, zed, video)"
+        "(known: synthetic, v4l2, oakd, zed, video, oden)"
     )

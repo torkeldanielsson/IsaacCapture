@@ -353,6 +353,11 @@ The source kind is selected by the ``type`` field of each entry in the YAML ``ca
    * - ``synthetic``
      - Debugging tool — GPU-generated test pattern, no camera or file required. ``stereo: true`` adds
        a ``disparity_px`` offset between the eyes.
+   * - ``oden``
+     - Robot cameras carried to this workstation by Voysys Oden: an Oden Player here shares each
+       camera through a CUDA IPC Texture Export, read in GPU memory (NV12 → RGBA on the GPU).
+       ``share_path`` is the export's Share Path; ``stereo: true`` takes ``share_path_right`` for the
+       right eye. See :code-file:`configs/oden.yaml <examples/camera_viz/configs/oden.yaml>`.
 
 .. _camera-streaming-live-camera:
 

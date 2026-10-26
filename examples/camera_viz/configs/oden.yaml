@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Oden source — robot cameras that Voysys Oden carries to this workstation.
+# An Oden Streamer on the robot captures and encodes the cameras; an Oden
+# Player here receives them and shares each one through a CUDA IPC Texture
+# Export entity. camera_viz reads the exports straight from GPU memory, so
+# there is no second encode/decode hop as in RTP split mode, and the
+# robot's network link is Oden's, with its FEC and rate control.
+#
+# On this workstation, run the Player headless with a project that has one
+# Texture Export per camera: its Share Path is this camera's share_path and
+# its Share Width / Share Height are this camera's width / height:
+#   oden-vr --headless --project player.vproj
+# Then start camera_viz with this config. The source retries until the
+# export is up, so the order does not matter.
+
+source: local                   # local only: Oden is the transport
+
+cameras:
+  - name: robot
+    enabled: true
+    type: oden
+    share_path: /tmp/oden_0     # Share Path of the Oden Texture Export
+    width: 1280                 # Share Width
+    height: 720                 # Share Height
+    # stereo: true              # one export per eye:
+    # share_path_right: /tmp/oden_1
+
+display:
+  mode: xr                      # xr | window (xr is the default)
+  window:
+    width: 1280
+    height: 720
+  xr:
+    near_z: 0.05
+    far_z: 100.0
+    # How long create() waits for the headset to connect. -1 (default) waits
+    # forever, so you can start the viewer before putting the Quest on; 0
+    # fails fast.
+    system_wait_seconds: -1
+  clear_color: [0.05, 0.05, 0.08, 1.0]
+  placements:
+    robot:                      # size defaults to 1.0 m wide × aspect-derived height
+      lock_mode: lazy
+      distance: 1.0
