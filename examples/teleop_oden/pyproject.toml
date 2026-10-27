@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "isaaccapture-examples-teleop-oden"
+version = "0.1.0"
+description = "Isaac Teleop's ROS 2 and ZMQ data carried to the robot by Voysys Oden"
+requires-python = ">=3.10,<3.14"
+# rclpy and the message packages come from the ROS 2 installation.
+dependencies = [
+    "msgpack",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+zmq = ["pyzmq"]
+
+[tool.hatch.build.targets.wheel]
+only-include = ["python/isaaccapture_examples/teleop_oden"]
+sources = ["python"]

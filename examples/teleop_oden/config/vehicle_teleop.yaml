@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# The vehicle_teleop example's ZMQ commands (examples/vehicle_teleop), carried to
+# the vehicle by Oden. On the workstation the steering or keyboard worker binds
+# tcp://*:5555 as usual; on the vehicle run the Panda worker with
+# --connect tcp://127.0.0.1:5555, where the robot bridge publishes.
+zmq:
+  - name: vehicle_control
+    direction: to_robot
+    topic: vehicle_control
+    source: tcp://127.0.0.1:5555
+    sink: tcp://127.0.0.1:5555
+    timestamp_field: timestamp_ns

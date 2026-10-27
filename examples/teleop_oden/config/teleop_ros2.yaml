@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# The teleop_ros2 reference publisher's topics (examples/teleop_ros2), carried to
+# the robot by Oden, and the robot's joint states carried back. Order is
+# priority: when a control message is full, later topics wait for the next one.
+to_robot:
+  - topic: /xr_teleop/ee_poses
+    type: teleop_ros2_interfaces/msg/NamedPoseArray
+    float32: true
+  - topic: /xr_teleop/root_twist
+    type: geometry_msgs/msg/TwistStamped
+    float32: true
+  - topic: /xr_teleop/root_pose
+    type: geometry_msgs/msg/PoseStamped
+    float32: true
+  - topic: /xr_teleop/finger_joints
+    type: sensor_msgs/msg/JointState
+    float32: true
+  - topic: /xr_teleop/head_pose
+    type: geometry_msgs/msg/PoseStamped
+    float32: true
+  - topic: /xr_teleop/controller_data
+    type: std_msgs/msg/ByteMultiArray
+    payload: msgpack
+    time_keys: [timestamp]
+    float32: true
+  - topic: /tf
+    type: tf2_msgs/msg/TFMessage
+    float32: true
+  - topic: /xr_teleop/hand
+    type: teleop_ros2_interfaces/msg/NamedPoseArray
+    float32: true
+  - topic: /xr_teleop/full_body
+    type: std_msgs/msg/ByteMultiArray
+    payload: msgpack
+    time_keys: [timestamp]
+    float32: true
+
+to_operator:
+  - topic: /joint_states
+    type: sensor_msgs/msg/JointState

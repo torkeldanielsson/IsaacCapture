@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# teleop_oden tests. The ROS-dependent ones skip without rclpy; the example's
+# container (examples/teleop_oden/Dockerfile) runs them all.
+
+[project]
+name = "teleop-oden-tests"
+version = "0.0.0"
+requires-python = ">=3.11,<3.14"
+
+[project.optional-dependencies]
+dev = ["pytest", "pyyaml", "msgpack", "pyzmq"]
