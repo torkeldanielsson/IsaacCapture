@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Both bridges against a stand-in for OCP, with the robot's clock 2.5 s off.
+"""Both bridges against a stand-in for OCP.
 
 The stand-in follows OCP's timing: the Player forwards the operator's newest
 data once per frame, the Streamer hands the newest control state to the robot
@@ -18,6 +18,7 @@ import socket
 import struct
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -27,18 +28,12 @@ from geometry_msgs.msg import PoseStamped  # noqa: E402
 from rclpy.executors import SingleThreadedExecutor  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
 from sensor_msgs.msg import JointState  # noqa: E402
+from std_msgs.msg import String  # noqa: E402
 
-from isaaccapture_examples.teleop_oden.clock_sync import SystemClock  # noqa: E402
 from isaaccapture_examples.teleop_oden.operator_bridge import OperatorBridge  # noqa: E402
 from isaaccapture_examples.teleop_oden.robot_bridge import RobotBridge  # noqa: E402
 
 NS = 1_000_000_000
-ROBOT_SKEW_NS = 2_500_000_000
-
-
-class SkewedClock(SystemClock):
-    def realtime_ns(self) -> int:
-        return time.time_ns() + ROBOT_SKEW_NS
 
 
 class _Peer:
@@ -193,7 +188,6 @@ class FakeOcp:
                             "ack_time": token,
                             "ack_time_mac": 0,
                             "client_user_data": at.get("user_data"),
-                            "roundtrip": at.get("roundtrip"),
                         }
                     )
             time.sleep(0.0005)
@@ -202,11 +196,10 @@ class FakeOcp:
 class _Side:
     """One ROS graph (its own domain), its bridge and an executor thread."""
 
-    def __init__(self, domain: int, bridge_cls, clock, params):
+    def __init__(self, domain: int, bridge_cls, params):
         self.context = rclpy.Context()
         rclpy.init(context=self.context, domain_id=domain)
         self.bridge = bridge_cls(
-            clock=clock,
             context=self.context,
             parameter_overrides=[Parameter(k, value=v) for k, v in params.items()],
         )
@@ -224,30 +217,46 @@ class _Side:
         rclpy.shutdown(context=self.context)
 
 
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 @pytest.fixture
 def rig(tmp_path, request):
     os.environ["ROS_AUTOMATIC_DISCOVERY_RANGE"] = "LOCALHOST"
     up_s, down_s, max_age_ms = getattr(request, "param", (0.02, 0.06, 500.0))
+    zmq_source, zmq_sink = _free_port(), _free_port()
     config = tmp_path / "bridge.yaml"
     config.write_text(
         "to_robot:\n"
-        "  - {topic: /cmd, type: geometry_msgs/msg/PoseStamped, float32: true}\n"
+        "  - {topic: /cmd, type: geometry_msgs/msg/PoseStamped, precision: 0.0001}\n"
+        "  - {topic: '/disc/*'}\n"
         "to_operator:\n"
         "  - {topic: /joint_states, type: sensor_msgs/msg/JointState}\n"
+        "zmq:\n"
+        "  - {name: steer, direction: to_robot, topic: vehicle_control,\n"
+        f"     source: 'tcp://127.0.0.1:{zmq_source}', sink: 'tcp://127.0.0.1:{zmq_sink}',\n"
+        "     payload: json, precision: 0.0001}\n"
     )
     ocp = FakeOcp(up_s, down_s)
     domain = random.randrange(100, 200)
-    common = {"config": str(config), "status_period_s": 0.25}
-    operator = _Side(
-        domain, OperatorBridge, SystemClock(), {**common, "ocp_port": ocp.operator.port}
-    )
+    common = {"config": str(config), "status_period_s": 0.25, "discovery_period_s": 0.2}
+    operator = _Side(domain, OperatorBridge, {**common, "ocp_port": ocp.operator.port})
     robot = _Side(
         domain + 1,
         RobotBridge,
-        SkewedClock(),
         {**common, "ocp_port": ocp.robot.port, "max_age_ms": max_age_ms},
     )
-    yield ocp, operator, robot
+    rig = SimpleNamespace(
+        ocp=ocp,
+        operator=operator,
+        robot=robot,
+        zmq_source=zmq_source,
+        zmq_sink=zmq_sink,
+    )
+    yield rig
     operator.close()
     robot.close()
     ocp.close()
@@ -280,79 +289,110 @@ def _stamped_pose(i):
     msg.header.stamp.sec, msg.header.stamp.nanosec = divmod(time.time_ns(), NS)
     msg.header.frame_id = "world"
     msg.pose.position.x = float(i)
+    msg.pose.position.y = 0.123456
     return msg
 
 
-def _ns(stamp):
-    return stamp.sec * NS + stamp.nanosec
-
-
-def test_commands_reach_the_robot_in_the_robot_clock(rig):
-    _ocp, operator, robot = rig
-    got = _collect(robot, PoseStamped, "/cmd")
-    sent = _drive(operator, "/cmd", _stamped_pose, seconds=4)
+def test_commands_reach_the_robot_with_stamps_as_sent(rig):
+    got = _collect(rig.robot, PoseStamped, "/cmd")
+    sent = _drive(rig.operator, "/cmd", _stamped_pose, seconds=3)
     time.sleep(0.5)
 
-    # The clock sync and OCP's first latency echo take a few frames.
     assert len(got) > 40, len(got)
     by_index = {int(m.pose.position.x): m for _, m in got}
-    xs = sorted(by_index)
-    assert xs == sorted(set(xs))
-    estimate = robot.bridge._sync.estimate(time.monotonic_ns())
-    bound = estimate.rtt_ns // 2
-    for x in xs:
-        expected = _ns(sent[x].header.stamp) + ROBOT_SKEW_NS
-        assert abs(_ns(by_index[x].header.stamp) - expected) <= bound + 2_000_000
-    # Robot-side ages: one way plus waits, nowhere near the 2.5 s skew.
-    ages = [(arrived + ROBOT_SKEW_NS) - _ns(m.header.stamp) for arrived, m in got]
-    assert 0 < sorted(ages)[len(ages) // 2] < 200_000_000
+    for x, m in by_index.items():
+        assert m.header == sent[x].header
+        assert m.pose.position.y == 0.1235
+    counts = rig.robot.bridge._counts
+    assert counts["t:/cmd:published"] == len(got)
+    assert not any(k.endswith("dropped_too_old") for k in counts)
 
 
-def test_robot_state_reaches_the_operator_in_its_clock(rig):
-    _ocp, operator, robot = rig
-    got = _collect(operator, JointState, "/joint_states")
+def test_robot_state_reaches_the_operator(rig):
+    got = _collect(rig.operator, JointState, "/joint_states")
 
     def joint_state(i):
         msg = JointState()
-        msg.header.stamp.sec, msg.header.stamp.nanosec = divmod(
-            time.time_ns() + ROBOT_SKEW_NS, NS
-        )
+        msg.header.stamp.sec, msg.header.stamp.nanosec = divmod(time.time_ns(), NS)
         msg.name = ["j0", "j1"]
         msg.position = [float(i), 0.5]
         return msg
 
-    sent = _drive(robot, "/joint_states", joint_state, seconds=3)
+    sent = _drive(rig.robot, "/joint_states", joint_state, seconds=3)
     time.sleep(0.5)
     assert len(got) > 20, len(got)
-    bound = robot.bridge._sync.estimate(time.monotonic_ns()).rtt_ns // 2
     for _, m in got:
         original = sent[int(m.position[0])]
-        expected = _ns(original.header.stamp) - ROBOT_SKEW_NS
-        assert abs(_ns(m.header.stamp) - expected) <= bound + 2_000_000
-        assert list(m.name) == ["j0", "j1"]
+        assert m.header == original.header
+        assert list(m.name) == ["j0", "j1"] and m.position[1] == 0.5
 
 
 def test_ocp_fault_stops_commands(rig):
-    ocp, operator, robot = rig
-    got = _collect(robot, PoseStamped, "/cmd")
-    _drive(operator, "/cmd", _stamped_pose, seconds=2)
+    got = _collect(rig.robot, PoseStamped, "/cmd")
+    _drive(rig.operator, "/cmd", _stamped_pose, seconds=2)
     assert got
-    ocp.fault = True
+    rig.ocp.fault = True
     time.sleep(0.3)
     before = len(got)
-    _drive(operator, "/cmd", _stamped_pose, seconds=1)
+    _drive(rig.operator, "/cmd", _stamped_pose, seconds=1)
     assert len(got) == before
-    assert robot.bridge._counts["/cmd:dropped_ocp_fault"] > 0
-    ocp.fault = False
-    _drive(operator, "/cmd", _stamped_pose, seconds=1)
+    assert rig.robot.bridge._counts["t:/cmd:dropped_ocp_fault"] > 0
+    rig.ocp.fault = False
+    _drive(rig.operator, "/cmd", _stamped_pose, seconds=1)
     assert len(got) > before
 
 
 @pytest.mark.parametrize("rig", [(0.08, 0.02, 40.0)], indirect=True)
 def test_samples_older_than_max_age_are_dropped(rig):
-    _ocp, operator, robot = rig
-    got = _collect(robot, PoseStamped, "/cmd")
-    _drive(operator, "/cmd", _stamped_pose, seconds=2)
+    got = _collect(rig.robot, PoseStamped, "/cmd")
+    _drive(rig.operator, "/cmd", _stamped_pose, seconds=2)
     time.sleep(0.3)
     assert got == []
-    assert robot.bridge._counts["/cmd:dropped_too_old"] > 0
+    assert rig.robot.bridge._counts["t:/cmd:dropped_too_old"] > 0
+
+
+def test_topics_matching_a_pattern_are_found_with_their_types(rig):
+    got_text = _collect(rig.robot, String, "/disc/text")
+    got_joints = _collect(rig.robot, JointState, "/disc/joints")
+    text = rig.operator.node.create_publisher(String, "/disc/text", 10)
+    joints = rig.operator.node.create_publisher(JointState, "/disc/joints", 10)
+    deadline = time.monotonic() + 8
+    while (not got_text or not got_joints) and time.monotonic() < deadline:
+        text.publish(String(data="hello"))
+        msg = JointState()
+        msg.name, msg.position = ["a"], [0.5]
+        joints.publish(msg)
+        time.sleep(0.05)
+    assert got_text and got_text[-1][1].data == "hello"
+    assert got_joints and list(got_joints[-1][1].position) == [0.5]
+    assert "/disc/text" in rig.operator.bridge._subscribed
+
+
+def test_json_zmq_stream_crosses_as_numbers(rig):
+    zmq = pytest.importorskip("zmq")
+    ctx = zmq.Context.instance()
+    producer = ctx.socket(zmq.PUB)
+    producer.bind(f"tcp://127.0.0.1:{rig.zmq_source}")
+    consumer = ctx.socket(zmq.SUB)
+    consumer.setsockopt(zmq.SUBSCRIBE, b"vehicle_control ")
+    consumer.connect(f"tcp://127.0.0.1:{rig.zmq_sink}")
+    try:
+        received = None
+        deadline = time.monotonic() + 8
+        sequence = 0
+        while received is None and time.monotonic() < deadline:
+            sequence += 1
+            payload = {
+                "sequence": sequence,
+                "timestamp_ns": time.time_ns(),
+                "steer": 0.123456,
+            }
+            producer.send(b"vehicle_control " + json.dumps(payload).encode())
+            if consumer.poll(20):
+                received = consumer.recv()
+        assert received is not None
+        body = json.loads(received.split(b" ", 1)[1])
+        assert body["steer"] == 0.1235 and isinstance(body["timestamp_ns"], int)
+    finally:
+        consumer.close()
+        producer.close()

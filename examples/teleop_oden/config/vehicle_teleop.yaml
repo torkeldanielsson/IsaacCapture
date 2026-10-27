@@ -11,4 +11,5 @@ zmq:
     topic: vehicle_control
     source: tcp://127.0.0.1:5555
     sink: tcp://127.0.0.1:5555
-    timestamp_field: timestamp_ns
+    payload: json
+    precision: 0.0001

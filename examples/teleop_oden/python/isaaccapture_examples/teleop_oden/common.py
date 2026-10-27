@@ -1,11 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Pieces both bridge nodes use: latency statistics, /tf handling and status output."""
+"""Pieces both bridge nodes use: statistics, /tf handling and status output."""
 
 from __future__ import annotations
 
 import json
+import time
 from collections import defaultdict
 
 TF_TYPE = "tf2_msgs/msg/TFMessage"
@@ -43,13 +44,12 @@ class PeriodStats:
 class Rates:
     """Per-second rates of monotonically growing counters between ``take`` calls."""
 
-    def __init__(self, clock):
-        self._clock = clock
+    def __init__(self):
         self._last: dict[str, int] = {}
-        self._t = clock.monotonic_ns()
+        self._t = time.monotonic_ns()
 
     def take(self, **counters: int) -> dict[str, float]:
-        now = self._clock.monotonic_ns()
+        now = time.monotonic_ns()
         dt = max(now - self._t, 1) / 1e9
         out = {
             k: round((v - self._last.get(k, v)) / dt, 1) for k, v in counters.items()
@@ -59,8 +59,8 @@ class Rates:
 
 
 class TfMerger:
-    """Operator side: /tf carries one frame per message, OCP keeps one message per
-    topic, so send the newest transform of every child frame together."""
+    """Sending side: /tf carries a few frames per message and the link keeps one
+    message per topic, so send the newest transform of every child frame together."""
 
     def __init__(self):
         self._latest: dict[str, object] = {}
@@ -74,8 +74,8 @@ class TfMerger:
 
 
 class TfRepeatFilter:
-    """Robot side: drop transforms already published with the same stamp (tf2 warns
-    about repeated data)."""
+    """Receiving side: drop transforms already published with the same stamp (tf2
+    warns about repeated data)."""
 
     def __init__(self):
         self._stamps: dict[str, tuple[int, int]] = {}

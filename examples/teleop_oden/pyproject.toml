@@ -8,7 +8,7 @@ build-backend = "hatchling.build"
 [project]
 name = "isaaccapture-examples-teleop-oden"
 version = "0.1.0"
-description = "Isaac Teleop's ROS 2 and ZMQ data carried to the robot by Voysys Oden"
+description = "ROS 2 topics and ZMQ streams carried between workstation and robot by Voysys Oden"
 requires-python = ">=3.10,<3.14"
 # rclpy and the message packages come from the ROS 2 installation.
 dependencies = [

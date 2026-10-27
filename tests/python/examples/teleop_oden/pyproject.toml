@@ -10,4 +10,4 @@ version = "0.0.0"
 requires-python = ">=3.11,<3.14"
 
 [project.optional-dependencies]
-dev = ["pytest", "pyyaml", "msgpack", "pyzmq"]
+dev = ["pytest", "pyyaml", "msgpack", "pyzmq", "cbor2"]

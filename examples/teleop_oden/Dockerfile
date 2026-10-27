@@ -13,6 +13,7 @@ ARG ROS_DISTRO
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-cbor2 \
     python3-colcon-common-extensions \
     python3-msgpack \
     python3-pytest \

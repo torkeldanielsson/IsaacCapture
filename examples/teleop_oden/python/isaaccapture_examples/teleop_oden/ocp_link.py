@@ -17,14 +17,12 @@ import threading
 import time
 from typing import Callable
 
-from .clock_sync import SystemClock
-
 # OCP rejects bigger frames; ours never come near.
 MAX_FRAME_BYTES = 16 * 1024
 # A peer frame bigger than this means the stream is not OCP.
 _MAX_READ_BYTES = 4 * 1024 * 1024
 
-OnMessage = Callable[[dict, int, int], None]
+OnMessage = Callable[[dict], None]
 
 
 class OcpLink:
@@ -35,11 +33,9 @@ class OcpLink:
         on_message: OnMessage,
         log_info: Callable[[str], None],
         log_warn: Callable[[str], None],
-        clock: SystemClock,
         retry_s: float = 1.0,
     ):
         self._address = (host, port)
-        self._clock = clock
         self._on_message = on_message
         self._log_info = log_info
         self._log_warn = log_warn
@@ -127,12 +123,8 @@ class OcpLink:
             if length > _MAX_READ_BYTES:
                 raise ValueError(f"OCP frame length {length} is not plausible")
             body = _read_exact(sock, length)
-            realtime_ns, monotonic_ns = (
-                self._clock.realtime_ns(),
-                self._clock.monotonic_ns(),
-            )
             self.frames_in += 1
-            self._on_message(json.loads(body), realtime_ns, monotonic_ns)
+            self._on_message(json.loads(body))
 
 
 def _read_exact(sock: socket.socket, n: int) -> bytes:
