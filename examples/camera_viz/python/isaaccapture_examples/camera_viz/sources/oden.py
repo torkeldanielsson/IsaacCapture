@@ -1,5 +1,5 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright (c) 2026 Voysys AB
+# SPDX-License-Identifier: MIT
 """Oden CUDA IPC texture export source for camera_viz.
 
 Reads one CUDA IPC Texture Export of Voysys Oden. The usual setup is an

@@ -1,5 +1,5 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright (c) 2026 Voysys AB
+# SPDX-License-Identifier: MIT
 
 # The vehicle_teleop example's ZMQ commands (examples/vehicle_teleop), carried to
 # the vehicle by Oden. On the workstation the steering or keyboard worker binds

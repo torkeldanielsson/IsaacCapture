@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright (c) 2026 Voysys AB
+# SPDX-License-Identifier: MIT
 
 # The Oden bridge for either end: ROS 2, the teleop_ros2 message package and this
 # example; no isaaccapture, so it also suits the robot. From the repository root:

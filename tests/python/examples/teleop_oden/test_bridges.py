@@ -1,5 +1,5 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright (c) 2026 Voysys AB
+# SPDX-License-Identifier: MIT
 
 """Both bridges against a stand-in for OCP.
 

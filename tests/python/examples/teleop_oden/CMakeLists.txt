@@ -1,4 +1,5 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2026 Voysys AB
 # SPDX-License-Identifier: Apache-2.0
 #
 # teleop_oden tests. Each test_*.py registers as its own ctest entry under the

@@ -1,5 +1,5 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright (c) 2026 Voysys AB
+# SPDX-License-Identifier: MIT
 """Tests for the Oden CUDA IPC texture export source (``type: oden``).
 
 Colour-conversion and config tests run everywhere. The read tests stand in

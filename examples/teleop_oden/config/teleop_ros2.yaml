@@ -1,5 +1,5 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright (c) 2026 Voysys AB
+# SPDX-License-Identifier: MIT
 
 # The teleop_ros2 reference publisher's topics (examples/teleop_ros2), carried to
 # the robot by Oden, and the robot's joint states carried back. Any topic of any
