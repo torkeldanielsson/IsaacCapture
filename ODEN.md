@@ -29,8 +29,7 @@ You need:
 - **Robot:** an NVIDIA Jetson or an Ubuntu PC, with Docker.
 - **Workstation:** Ubuntu 24.04 with an NVIDIA GPU, the CUDA toolkit
   (`sudo apt install cuda-toolkit` from NVIDIA's repository) and Docker.
-- **An Oden licence for each machine.** Voysys Free is free for non-commercial use,
-  with a renewable 7-day trial for commercial use:
+- **An Oden licence for each machine.** Get them with Voysys Free:
   [sign up](https://portal.voysys.dev/signup).
 
 Install the Oden Fleet Streamer (the Streamer with the OCP plugin) on the robot and
