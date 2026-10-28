@@ -191,7 +191,7 @@ commands. `operator.vproj` runs OdenVR at 90 Hz.
 
 ### Without a headset
 
-`teleop_ros2` replays recorded input. Isaac's reference image (about 12 GB) holds
+`teleop_ros2` replays recorded input. Isaac's reference image (about 4 GB) holds
 a generator for a recording; the second argument is its length in frames, 60 a
 second (36000 is ten minutes):
 
