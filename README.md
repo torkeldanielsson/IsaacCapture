@@ -3,6 +3,11 @@ SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES.
 SPDX-License-Identifier: Apache-2.0
 -->
 
+> **This fork** runs Isaac Teleop over [Voysys Oden](https://voysys.se): the robot's
+> cameras in camera_viz, and any ROS 2 topic or ZMQ stream between workstation and
+> robot, over Wi-Fi, 4G/5G or the internet. Start with [ODEN.md](ODEN.md). The rest
+> of this README is Isaac Capture's own.
+
 # NVIDIA Isaac Capture
 
 <div align="center">
