@@ -1,0 +1,97 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Voysys AB
+# SPDX-License-Identifier: MIT
+#
+# Oden Streamer project for the robot: one 1280x720 camera, sent over one link
+# to the operator's workstation on UDP port 47000. From the repository root,
+# put the workstation's address in a copy and start the Streamer without a
+# window:
+#
+#   sed 's/OPERATOR_IP/192.168.1.20/' examples/teleop_oden/oden/robot.vproj > ~/robot.vproj
+#   oden-streamer --headless --project ~/robot.vproj
+#
+# The camera is a test pattern. For a real camera, set `pipeline` to a
+# GStreamer pipeline that ends in 1280x720 RGBA; the teleop_oden README shows
+# one for Jetson cameras, and how to add cameras and links.
+config : {
+    scene_manager : {
+        next_scene_id : 1;
+        scenes : ( {
+                scene_id : 0;
+                uuid : "18655dae-32f1-4343-ab02-e2e001b905de";
+                root_entity : {
+                    uuid : "f53cc36b-4fc3-4607-66d4-00cedcdfef49";
+                    children : ( {
+                            uuid : "5e11f5fb-8a2d-413d-1778-4f435bd3bade";
+                            type : "output_alignment";
+                            children : ( {
+                                    id : "forward";
+                                    uuid : "6664c23d-6341-4cd5-0375-60279a10571f";
+                                    position : [ -2.58588, 0.140537, -5.0 ];
+                                    scale : [ 1.911303, 1.911303, 1.911303 ];
+                                    type : "panorama_video";
+                                    pv : {
+                                        type : "flat_video_config";
+                                        output_alignment_data : {
+                                            id : 1;
+                                        };
+                                        streams : ( {
+                                            id : 1;
+                                            uuid : "5276acbc-c226-44d3-2d8c-a66e46288074";
+                                            type : "video";
+                                            width : 1280;
+                                            height : 720;
+                                            capture : {
+                                                impl : "gstreamer";
+                                                pipeline : "videotestsrc pattern=smpte horizontal-speed=4 ! video/x-raw, width=1280, height=720, framerate=30/1";
+                                                pixel_format : "rgba";
+                                                use_nvdec : false;
+                                                use_sync : true;
+                                            };
+                                        } );
+                                    };
+                                } );
+                        } );
+                };
+            } );
+    };
+    stream_settings : {
+        bandwidth_control : {
+            use_fec : true;
+            fec_min_extra_packets : 1;
+            high : {
+                bytes_in_flight_pid : {
+                    target : 0.5;
+                };
+            };
+        };
+        type : "realtime_nvenc_gstreamer";
+        streamer_max_fps : 70.0;
+        sync_to_video_source : true;
+        sync_video_source_id : "5276acbc-c226-44d3-2d8c-a66e46288074";
+        net_settings : {
+            links : ( {
+                    uuid : "342f3136-7e7a-44c8-696c-dc17c97e095b";
+                    name : "operator";
+                    mode : "sender";
+                    destination_ip : "OPERATOR_IP";
+                    destination_port : 47000;
+                    p2p_settings : {
+                        enable : false;
+                    };
+                } );
+        };
+        encoder_settings : {
+            use_custom_resolution : true;
+            width : 1280;
+            height : 720;
+            frame_rate : "f_r_60";
+            bitrate : 1000000L;
+            color_format : "y_cb_cr_hd_full";
+            intra_refresh : true;
+            codec : "hevc";
+            preset : "low_latency_high_performance";
+            rate_control_mode : "cbr";
+        };
+    };
+    background_behaviour : "hide";
+};

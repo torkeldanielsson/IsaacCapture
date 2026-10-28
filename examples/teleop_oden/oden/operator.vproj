@@ -1,0 +1,59 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Voysys AB
+# SPDX-License-Identifier: MIT
+#
+# OdenVR project for the operator's workstation: receives robot.vproj's camera
+# on UDP port 47000 and shares it with camera_viz as a 1280x720 CUDA IPC
+# texture at /tmp/oden_0, as in camera_viz's oden.yaml. OdenVR runs at 90 Hz,
+# so commands cross 70-95 times a second. Start it without a window, with an
+# absolute path, from the repository root:
+#
+#   oden-vr --headless --project $PWD/examples/teleop_oden/oden/operator.vproj
+#
+# A second camera on the robot (output_alignment_data id 2) needs a second
+# texture_export here, with source_uuid ending in 02 and share_path /tmp/oden_1.
+config : {
+    scene_manager : {
+        next_scene_id : 1;
+        scenes : ( {
+                scene_id : 0;
+                uuid : "6f01b38b-e08a-4398-c0bc-56aec7d29453";
+                root_entity : {
+                    uuid : "14948183-b3fe-49b1-86f2-0d80d774311d";
+                    children : ( {
+                            uuid : "9ef0feb5-3aad-472d-3ba5-e54bb5a112f1";
+                            position : [ 1.4, 0.6, -2.0 ];
+                            scale : [ 0.5, 0.5, 0.5 ];
+                            type : "remote_streamer";
+                            stream : {
+                                id : 1;
+                                # The robot's camera with output_alignment_data
+                                # id N arrives as this uuid with its last byte N.
+                                uuid : "ff050a58-9850-462e-e99e-95ab0d1b1400";
+                                width : 1920;
+                                height : 1088;
+                                capture : {
+                                    impl : "lltp";
+                                };
+                            };
+                            net_settings : {
+                                links : ( {
+                                        uuid : "79dd1c1d-4808-4186-ebc3-220f14de1189";
+                                        name : "robot";
+                                        mode : "receiver";
+                                        receive_port : 47000;
+                                    } );
+                            };
+                        }, {
+                            uuid : "09cd5283-aac8-470c-6862-d315c3fdd57a";
+                            type : "texture_export";
+                            source_uuid : "ff050a58-9850-462e-e99e-95ab0d1b1401";
+                            width : 1280;
+                            height : 720;
+                            share_path : "/tmp/oden_0";
+                        } );
+                };
+            } );
+    };
+    use_idle_framerate_cap : true;
+    idle_framerate_cap : 90.0;
+};

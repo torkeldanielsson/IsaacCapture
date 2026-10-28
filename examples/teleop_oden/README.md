@@ -114,9 +114,8 @@ Streamer starts with OCP on, the Player with OCP off: tick the *Oden Control
 Pipeline* plugin in OdenVR, or set `disabled : false;` in
 `/var/lib/oden/OdenVR/libocp_2de7c4c4-8cb6-48f1-a59d-bc3007d9df22.conf`.
 
-Run OdenVR headless (`oden-vr --headless --project PROJECT`). A windowed OdenVR
-follows the screen, and slows to about one frame a second when the screen blanks;
-OCP then stops the commands.
+Start the Streamer and OdenVR with the projects in [`oden/`](oden), as in
+[Oden projects](#oden-projects).
 
 Build the bridge image on each machine from the repository root. On a Jetson whose
 kernel lacks iptables' `raw` table, add `--network=host`:
@@ -146,6 +145,50 @@ To carry other topics, mount a config of your own (`-v $PWD/my.yaml:/my.yaml`,
 Start `teleop_ros2` with the same discovery setting, or its topics reach the robot
 directly over the network, past the robot's checks.
 
+### Oden projects
+
+[`oden/robot.vproj`](oden/robot.vproj) and [`oden/operator.vproj`](oden/operator.vproj)
+are a working pair: one 1280×720 camera over one link, on UDP port 47000. The robot
+sends to the workstation, so the workstation needs an address the robot can reach,
+with that port open. From the repository root, on the robot, put the workstation's
+address in a copy of the project; on the workstation, turn on OCP:
+
+```bash
+# robot
+sed 's/OPERATOR_IP/192.168.1.20/' examples/teleop_oden/oden/robot.vproj > ~/robot.vproj
+oden-streamer --headless --project ~/robot.vproj
+# workstation
+echo 'config : { disabled : false; };' > /var/lib/oden/OdenVR/libocp_2de7c4c4-8cb6-48f1-a59d-bc3007d9df22.conf
+oden-vr --headless --project $PWD/examples/teleop_oden/oden/operator.vproj
+```
+
+Give `--project` an absolute path: `oden-vr` and `oden-streamer` start Oden in its
+install directory. Run OdenVR headless. A windowed OdenVR follows the screen, and
+slows to about one frame a second when the screen blanks; OCP then stops the
+commands. `operator.vproj` runs OdenVR at 90 Hz.
+
+- **A real camera.** Set the robot's `pipeline` to a GStreamer pipeline that ends
+  in 1280×720 RGBA. For a Jetson CSI or GMSL camera, use one of the modes that
+  `nvarguscamerasrc` lists when it starts:
+
+  ```text
+  nvarguscamerasrc sensor-id=0 ! video/x-raw(memory:NVMM), width=1920, height=1080, framerate=30/1 ! nvvidconv ! video/x-raw, format=RGBA, width=1280, height=720
+  ```
+
+- **A second camera.** In `robot.vproj`, copy the camera's `panorama_video` entity.
+  Give the copy its own `id`, a new `uuid` for the entity and for its stream (from
+  `uuidgen`), its own `pipeline` and
+  `output_alignment_data : { id : 2; position_px : [ 0, 720 ]; };`, and keep its
+  stream `id : 1`. Set the encoder's `height` to 1440, so that both cameras fit.
+  In `operator.vproj`, add a second `texture_export` whose `source_uuid` ends in
+  `02` and whose `share_path` is `/tmp/oden_1`, and add a camera with that
+  `share_path` to camera_viz's config.
+- **A second link.** Copy the link in each project and leave out the copy's
+  `uuid`. On the robot, give the copy its own `name`, the workstation's address on
+  the other network and `destination_port : 47001`; on the workstation, its own
+  `name` and `receive_port : 47001`. Each link carries all the video and control
+  data.
+
 ### Without a headset
 
 `teleop_ros2` replays recorded input. Isaac's reference image (about 12 GB) holds
@@ -168,8 +211,8 @@ On the robot, anything that publishes `/joint_states` stands in for the robot.
 
 - Commands cross once per Player frame, and OCP skips a frame that comes less than
   10 ms after the last one: 30 times a second for a headless Player by default,
-  75–95 with `use_idle_framerate_cap : true; idle_framerate_cap : 90.0;` at the top
-  level of the project's `config`.
+  70–95 with `use_idle_framerate_cap : true; idle_framerate_cap : 90.0;` at the top
+  level of the project's `config`, as in `oden/operator.vproj`.
   A cap of 100 Hz halves the rate.
 - The Streamer's OCP reads at most 4 KiB per control message; `budget_bytes` keeps
   the user data under it.

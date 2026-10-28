@@ -46,31 +46,31 @@ curl -fsSL https://releases.voysys.dev/install.sh | sh -s -- vr --nightly latest
 oden-vr --activate YOUR-ODENVR-KEY
 ```
 
-Stream the robot's cameras to OdenVR as in Oden's
-[first vehicle stream](https://docs.voysys.dev/start/first-vehicle-stream) guide.
-The Streamer has OCP on; in OdenVR, tick the *Oden Control Pipeline* plugin. Then
-add a **CUDA IPC Texture Export** to OdenVR's project for each camera:
-
-- **Source:** the camera's stream (listed once video arrives).
-- **Share Path:** `/tmp/oden_0`, then `/tmp/oden_1` and so on.
-- **Share Width** and **Height:** 1280 and 720, as in camera_viz's `oden.yaml`.
-- Press **Start**, and save the project.
-
-From then on, run OdenVR without a window. A windowed OdenVR follows the screen:
-when the screen blanks, it slows to about one frame a second, and the robot stops
-taking commands. For 90 commands a second, add
-`use_idle_framerate_cap : true; idle_framerate_cap : 90.0;` at the top level of
-the project's `config`:
-
-```bash
-oden-vr --headless --project ~/robot.vproj
-```
-
-Then show the cameras in camera_viz. The first setup builds Isaac Capture from
-the checkout, with Isaac's build dependencies:
+Get this fork on both machines and start Oden with its two ready-made projects.
+The robot's project sends a test camera to the workstation on UDP port 47000, so
+the workstation needs an address the robot can reach, with that port open. On the
+workstation, one line turns on OCP, and the project receives the camera, shares it
+with camera_viz and runs OdenVR at 90 Hz:
 
 ```bash
 git clone -b oden https://github.com/torkeldanielsson/IsaacCapture.git && cd IsaacCapture
+# robot, with the workstation's address
+sed 's/OPERATOR_IP/192.168.1.20/' examples/teleop_oden/oden/robot.vproj > ~/robot.vproj
+oden-streamer --headless --project ~/robot.vproj
+# workstation
+echo 'config : { disabled : false; };' > /var/lib/oden/OdenVR/libocp_2de7c4c4-8cb6-48f1-a59d-bc3007d9df22.conf
+oden-vr --headless --project $PWD/examples/teleop_oden/oden/operator.vproj
+```
+
+Both run without a window. A windowed OdenVR follows the screen: when the screen
+blanks, it slows to about one frame a second, and the robot stops taking commands.
+For real cameras, more cameras or more links, see
+[Oden projects](examples/teleop_oden/README.md#oden-projects).
+
+Then show the camera in camera_viz. The first setup builds Isaac Capture from the
+checkout, with Isaac's build dependencies:
+
+```bash
 examples/camera_viz/camera_viz.sh setup --build-from-source
 examples/camera_viz/camera_viz.sh run examples/camera_viz/configs/oden.yaml --mode window
 ```
