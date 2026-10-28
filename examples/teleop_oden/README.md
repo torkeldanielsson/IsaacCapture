@@ -69,9 +69,7 @@ other end has acknowledged, floats too when the topic has a `precision`, and run
 of unchanged values shrink to two bytes, so a value that changes a little costs
 about a byte. OCP stores all of it as CBOR.
 
-Stamps cross as they were sent. Neither the bridges nor OCP need the two machines'
-clocks to agree; if robot code compares message stamps with its own clock, run
-NTP or PTP between the machines, as on any ROS 2 network.
+Message stamps cross exactly as they were sent.
 
 `/oden_teleop/status` (`diagnostic_msgs/DiagnosticArray`) on both ends reports the
 OCP state, rates, drops, sample ages and, on the workstation, the bandwidth towards
@@ -80,14 +78,23 @@ the robot in total and per topic (`to_robot_kbit_s`, `to_robot_kbit_s_by_channel
 
 ## Safety
 
-The robot bridge publishes each sample once, and drops it while OCP reports a fault
-(`stop_on_ocp_fault`) and when it may be older than `max_age_ms` (default 500, OCP's
-own latency limit). The age bound is OCP's latency, the round trip of a token from
-the Streamer's clock back to it, plus how long the sample waited on the
-workstation: two durations, each measured on one machine. When the operator's data
-stops, nothing more is published, so robot-side timeouts work as they do on a local
-network. OCP raises a fault within half a second of losing the operator bridge, the
-Player or the link.
+Every check runs on the robot:
+
+- Only topics listed in the robot's own copy of the config are published there.
+- No command passes while OCP reports a fault (`stop_on_ocp_fault`). OCP's faults
+  carry the health of both ends: lost input or feedback, a stopped camera, a slow
+  Streamer, high latency.
+- Every command is checked for age. OCP measures the loop from a time stamp the
+  Streamer puts in the video to the operator's commands that return it. The robot
+  bridge adds how long the sample waited at the workstation, and drops it when the
+  total may exceed `max_age_ms` (default 500, OCP's own latency limit).
+- Each topic keeps only its newest sample, and each sample is published once, so a
+  stalled link never replays a backlog.
+- When the operator's data stops, nothing more is published, so robot-side
+  timeouts work as they do on a local network. OCP raises a fault within half a
+  second of losing the operator bridge, the Player or the link.
+
+The robot's own controllers keep their limits, interlocks and emergency stop.
 
 ## Running it
 
