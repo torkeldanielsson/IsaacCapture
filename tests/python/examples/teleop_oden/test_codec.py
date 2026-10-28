@@ -5,26 +5,9 @@ import json
 import math
 
 
-from isaaccapture_examples.teleop_oden.codec import (
-    delta,
-    flatten_stream,
-    rebuild_stream,
-    undelta,
-)
+from isaaccapture_examples.teleop_oden.codec import flatten_stream, rebuild_stream
 
 NS = 1_000_000_000
-
-
-def test_delta_round_trip_moves_only_integers():
-    base = [10, 2.5, "x", 7]
-    values = [13, 2.75, "y", 7]
-    wire = delta(values, base)
-    assert wire == [3, 2.75, "y", 0]
-    assert undelta(wire, base) == values
-
-
-def test_delta_refuses_differences_beyond_64_bits():
-    assert delta([2**64 - 1], [-(2**63)]) is None
 
 
 def test_raw_stream_is_bytes_in_and_out():

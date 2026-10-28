@@ -414,20 +414,3 @@ def rebuild_stream(schema: dict, values: list) -> bytes:
         return json.dumps(tree, separators=(",", ":")).encode()
     (raw,) = values
     return base64.b64decode(raw)
-
-
-def delta(values: list, base: list) -> list | None:
-    """Integers as their difference to ``base``; None when one would not fit 64 bits."""
-    out = [
-        v - b if type(v) is int and type(b) is int else v for v, b in zip(values, base)
-    ]
-    for d in out:
-        if type(d) is int and not _INT_MIN <= d < _INT_END:
-            return None
-    return out
-
-
-def undelta(wire: list, base: list) -> list:
-    return [
-        w + b if type(w) is int and type(b) is int else w for w, b in zip(wire, base)
-    ]

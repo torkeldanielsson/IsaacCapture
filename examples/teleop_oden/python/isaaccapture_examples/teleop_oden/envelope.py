@@ -6,17 +6,17 @@
 OCP keeps only the newest user data, sends it once per Oden frame and stores it
 as CBOR on the wire, so the envelope is plain JSON of small numbers. Every
 envelope carries the newest sample of every channel until the receiver
-acknowledges it. Integer values go as the difference to a sample the receiver
-has acknowledged, so values that change little cost about a byte, and a run of
-three or more zeros goes as ``null, count``. Fields::
+acknowledges it. Each sample is complete in itself: its values are absolute, so
+decoding it needs only its schema, and a lost envelope never affects a later
+one. A schema (the names) goes once, until the receiver acknowledges it. Within
+a sample, a run of three or more zeros goes as ``null, count``. Fields::
 
     v    format version
     id   sender session id (new on every start)
     c    [[schema number, schema], ...]          schemas the receiver lacks
-    s    [[schema number, seq, back, hold_ms, value, ...], ...]
-         seq counts the channel's samples modulo 2^16; the values are relative to
-         the sample ``back`` before (0: absolute); hold_ms is how long the sample
-         had waited on the sending machine when the envelope was built
+    s    [[schema number, seq, hold_ms, value, ...], ...]
+         seq counts the channel's samples modulo 2^16; hold_ms is how long the
+         sample had waited on the sending machine when the envelope was built
     a    [peer id, schema number, seq or null, ...]
          the newest schema and sample this side holds of each of the peer's channels
 """
@@ -27,15 +27,11 @@ import json
 import random
 import struct
 from collections import Counter, OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from .codec import Flat, channel_key, delta, undelta
+from .codec import Flat, channel_key
 
-VERSION = 2
-# Samples kept per channel at both ends as bases for differences. The sender
-# only uses acknowledged ones, so this covers acknowledgements up to this many
-# samples late.
-HISTORY = 256
+VERSION = 3
 MAX_SCHEMAS = 1024
 _SEQ = 0xFFFF
 
@@ -138,8 +134,7 @@ class _Channel:
     current: _Sample | None = None
     # A newer sample waiting for min_interval_ns to pass: (flat, put time).
     waiting: tuple | None = None
-    history: OrderedDict = field(default_factory=OrderedDict)
-    # (sample seq, base seq) -> (entry values, their CBOR bytes)
+    # (sample seq, (wire values, their CBOR bytes))
     cached: tuple | None = None
 
 
@@ -203,9 +198,6 @@ class Outbox:
         ch.waiting = None
         ch.seq += 1
         ch.current = _Sample(self._number(flat.schema), ch.seq, flat.values, t_ns)
-        ch.history[ch.seq] = ch.current
-        while len(ch.history) > HISTORY:
-            ch.history.popitem(last=False)
 
     def forget_peer(self) -> None:
         """The peer restarted: it holds none of our schemas or samples."""
@@ -222,34 +214,16 @@ class Outbox:
                 view[channel_key(schema)] = (ack[i], ack[i + 1])
         self._peer = view
 
-    def _entry(self, ch: _Channel, held: tuple | None, now_ns: int) -> tuple[list, int]:
+    def _entry(self, ch: _Channel, now_ns: int) -> tuple[list, int]:
         cur = ch.current
-        base = None
-        if held and held[0] == cur.number and held[1] is not None:
-            base_seq = cur.seq - ((cur.seq - held[1]) & _SEQ)
-            base = ch.history.get(base_seq)
-            if base is not None and base.number != cur.number:
-                base = None
-        base_seq = base.seq if base else 0
-        if ch.cached and ch.cached[0] == (cur.seq, base_seq):
+        if ch.cached and ch.cached[0] == cur.seq:
             values, size = ch.cached[1]
         else:
-            values = None
-            if base is not None and len(base.values) == len(cur.values):
-                values = delta(cur.values, base.values)
-            if values is None:
-                base_seq = 0
-                values = cur.values
-            values = squeeze(values)
+            values = squeeze(cur.values)
             size = sum(cbor_size(v) for v in values)
-            ch.cached = ((cur.seq, base_seq), (values, size))
+            ch.cached = (cur.seq, (values, size))
         hold_ms = min(max(0, -(-(now_ns - cur.t_ns) // 1_000_000)), 0xFFFF)
-        head = [
-            cur.number,
-            cur.seq & _SEQ,
-            (cur.seq - base_seq) if base_seq else 0,
-            hold_ms,
-        ]
+        head = [cur.number, cur.seq & _SEQ, hold_ms]
         entry = head + values
         return entry, _head(len(entry)) + sum(cbor_size(v) for v in head) + size
 
@@ -293,7 +267,7 @@ class Outbox:
             number = ch.current.number
             if not ((held and held[0] == number) or number in sent_schemas):
                 continue
-            entry, c = self._entry(ch, held, now_ns)
+            entry, c = self._entry(ch, now_ns)
             j = json_size(entry) + 1
             if cbor_used + c > self.cbor_budget or json_used + j > self.json_budget:
                 self.dropped[key] += 1
@@ -326,18 +300,16 @@ class _Held:
 
 
 class Inbox:
-    """Schemas and recent samples of the peer's current session."""
+    """Schemas of the peer's current session, and the newest sample seen per channel."""
 
     def __init__(self):
         self.peer_sid: int | None = None
         self.missing_schema: Counter[str] = Counter()
-        self.missing_base: Counter[str] = Counter()
         self._reset()
 
     def _reset(self) -> None:
         self._schemas: OrderedDict[int, dict] = OrderedDict()
         self._held: dict[str, _Held] = {}
-        self._history: dict[int, OrderedDict[int, list]] = {}
 
     def ack(self) -> list | None:
         if self.peer_sid is None:
@@ -350,7 +322,7 @@ class Inbox:
         return out
 
     def accept(self, env: dict) -> list[Received]:
-        """The envelope's samples this side does not hold yet, with absolute values.
+        """The envelope's samples this side does not hold yet.
 
         OCP repeats its newest message until the next one, so most envelopes are
         repeats; a repeat yields nothing.
@@ -367,12 +339,11 @@ class Inbox:
             # used before (a topic switching back to an earlier layout).
             self._held.setdefault(channel_key(schema), _Held()).schema_number = number
         while len(self._schemas) > MAX_SCHEMAS:
-            number, _ = self._schemas.popitem(last=False)
-            self._history.pop(number, None)
+            self._schemas.popitem(last=False)
         out = []
         for entry in env.get("s", ()):
-            number, seq, back, hold_ms = entry[:4]
-            wire = expand(entry[4:])
+            number, seq, hold_ms = entry[:3]
+            values = expand(entry[3:])
             schema = self._schemas.get(number)
             if schema is None:
                 self.missing_schema[str(number)] += 1
@@ -381,18 +352,6 @@ class Inbox:
             held = self._held[key]
             if held.seq is not None and not newer(seq, held.seq):
                 continue
-            history = self._history.setdefault(number, OrderedDict())
-            if back:
-                base = history.get((seq - back) & _SEQ)
-                if base is None or len(base) != len(wire):
-                    self.missing_base[key] += 1
-                    continue
-                values = undelta(wire, base)
-            else:
-                values = wire
-            history[seq] = values
-            while len(history) > HISTORY:
-                history.popitem(last=False)
             held.schema_number = held.sample_number = number
             held.seq = seq
             out.append(Received(key, schema, values, hold_ms))

@@ -313,7 +313,6 @@ class Bridge(Node):
                 "dropped_over_budget": dict(self._outbox.dropped),
                 "schema_waiting_for_room": dict(self._outbox.schema_waiting),
                 "missing_schema": dict(self._inbox.missing_schema),
-                "missing_base": dict(self._inbox.missing_base),
                 "age": self._ages.take(),
                 "counts": dict(self._counts),
             }

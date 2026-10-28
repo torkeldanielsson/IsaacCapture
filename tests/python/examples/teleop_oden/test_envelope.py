@@ -62,42 +62,60 @@ def test_samples_cross_once_and_schemas_until_acknowledged():
     assert [r.values for r in inbox.accept(third)] == [[3, 2.5]]
 
 
-def test_integers_cross_as_differences_to_an_acknowledged_sample():
+def test_every_sample_carries_its_values_in_full():
     out, inbox = _box(), Inbox()
     out.put("t:/a", _flat("/a", [1_000_000, 0.5, 7]), 0)
     _exchange(out, inbox)
     out.put("t:/a", _flat("/a", [1_000_003, 0.75, 7]), 0)
     env = _wire(out.build(0, None))
-    _number, _seq, back, _hold, *values = env["s"][0]
-    assert back == 1 and values == [3, 0.75, 0]
+    _number, _seq, _hold, *values = env["s"][0]
+    assert values == [1_000_003, 0.75, 7]
     assert [r.values for r in inbox.accept(env)] == [[1_000_003, 0.75, 7]]
 
 
-def test_differences_survive_lost_envelopes_and_acks():
-    out, inbox = _box(), Inbox()
+def test_each_envelope_decodes_with_the_schema_alone():
+    out = _box()
     rng = random.Random(3)
-    truth = [0]
+    out.put("t:/a", _flat("/a", [0, 0]), 0)
+    first = _wire(out.build(0, None))
+    envelopes = []
+    for i in range(1, 300):
+        out.put("t:/a", _flat("/a", [i, rng.randrange(-(2**40), 2**40)]), 0)
+        envelopes.append(
+            (i, out._channels["t:/a"].current.values, _wire(out.build(0, None)))
+        )
+    # A receiver that saw only the schema decodes any one later envelope exactly,
+    # whatever was lost before it.
+    for _i, values, env in envelopes:
+        inbox = Inbox()
+        inbox.accept(first)
+        assert [r.values for r in inbox.accept(env)] == [values]
+
+
+def test_lost_envelopes_and_acks_never_affect_later_samples():
+    out, inbox = _box(), Inbox()
+    rng = random.Random(5)
+    truth = {}
     out.put("t:/a", _flat("/a", [0, 0]), 0)
     _exchange(out, inbox)
     delivered = []
     for i in range(1, 300):
-        truth.append(truth[-1] + rng.randrange(-50, 50))
+        truth[i] = rng.randrange(-1000, 1000)
         out.put("t:/a", _flat("/a", [i, truth[i]]), 0)
         env = _wire(out.build(0, None))
         if rng.random() < 0.3:
             continue  # lost on the way
-        delivered += [r.values for r in inbox.accept(env)]
+        got = inbox.accept(env)
+        assert len(got) == 1  # every envelope that arrives delivers its sample
+        delivered += [r.values for r in got]
         if rng.random() < 0.3:
             continue  # its acknowledgement lost on the way back
         out.peer_ack(_wire(inbox.ack()))
-    delivered += [r.values for r in _exchange(out, inbox)]
     assert all(v == truth[i] for i, v in delivered)
     assert [i for i, _ in delivered] == sorted({i for i, _ in delivered})
-    assert delivered[-1] == [299, truth[299]]
-    assert sum(inbox.missing_base.values()) == 0
 
 
-def test_differences_follow_the_ack_across_sequence_wrap():
+def test_samples_follow_the_ack_across_sequence_wrap():
     out, inbox = _box(), Inbox()
     for i in range(70_000):
         out.put("t:/a", _flat("/a", [i]), 0)
@@ -114,7 +132,7 @@ def test_new_session_resets_the_receiver():
         assert len(inbox.accept(_wire(out.build(0, None)))) == 1
 
 
-def test_receiver_restart_resends_schema_and_absolute_values():
+def test_receiver_restart_resends_the_schema():
     out, inbox = _box(), Inbox()
     out.put("t:/a", _flat("/a", [5]), 0)
     _exchange(out, inbox)
@@ -136,14 +154,13 @@ def test_sample_without_its_schema_waits():
     assert sum(inbox.missing_schema.values()) == 1
 
 
-def test_schema_change_is_resent_with_absolute_values():
+def test_schema_change_is_resent():
     out, inbox = _box(), Inbox()
     out.put("t:/a", _flat("/a", [1, 2]), 0)
     _exchange(out, inbox)
     out.put("t:/a", _flat("/a", [1, 2, 3], names=("a", "c")), 0)
     env = _wire(out.build(0, None))
     assert [schema["k"] for _, schema in env["c"]] == [["a", "c"]]
-    assert env["s"][0][2] == 0
     got = inbox.accept(env)
     assert got[0].schema["k"] == ["a", "c"] and got[0].values == [1, 2, 3]
 
@@ -152,7 +169,7 @@ def test_hold_is_the_time_waited_on_the_sender():
     out = _box()
     out.put("t:/a", _flat("/a", [1]), 100 * MS)
     env = out.build(112 * MS + 1, None)
-    assert env["s"][0][3] == 13
+    assert env["s"][0][2] == 13
 
 
 def test_budget_holds_and_earlier_channels_win():
@@ -266,14 +283,13 @@ def test_zero_runs_squeeze_and_expand():
     assert expand(wire) == values
 
 
-def test_unchanged_values_cost_two_bytes_per_run():
+def test_a_run_of_zeros_in_a_sample_costs_two_bytes():
     out, inbox = _box(), Inbox()
-    out.put("t:/a", _flat("/a", list(range(1, 201))), 0)
-    _exchange(out, inbox)
-    out.put("t:/a", _flat("/a", list(range(1, 200)) + [7]), 0)
+    values = [5] + [0] * 199 + [7]
+    out.put("t:/a", _flat("/a", values), 0)
     env = _wire(out.build(0, None))
-    assert env["s"][0][4:] == [None, 199, 7 - 200]
-    assert inbox.accept(env)[0].values == list(range(1, 200)) + [7]
+    assert env["s"][0][3:] == [5, None, 199, 7]
+    assert inbox.accept(env)[0].values == values
 
 
 def test_switching_back_to_an_earlier_schema_is_acknowledged():

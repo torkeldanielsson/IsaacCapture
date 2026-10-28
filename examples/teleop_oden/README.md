@@ -64,10 +64,11 @@ teleop_ros2_interfaces, and other packages go in the same way.
 OCP sends the newest control data once per Player frame, so each topic crosses as
 its newest sample, resent until the other end acknowledges it. A message is split
 into a schema (topic, type, strings, map keys, sequence lengths), sent until
-acknowledged, and its numbers. Integers cross as the difference to a sample the
-other end has acknowledged, floats too when the topic has a `precision`, and runs
-of unchanged values shrink to two bytes, so a value that changes a little costs
-about a byte. OCP stores all of it as CBOR.
+acknowledged, and its numbers. Every sample carries all of its numbers, so it
+decodes with its schema alone, and a lost control message never affects a later
+one. Floats cross as whole multiples of the topic's `precision` when it has one,
+and a run of three or more zeros shrinks to two bytes. OCP stores all of it as
+CBOR.
 
 Message stamps cross exactly as they were sent.
 
