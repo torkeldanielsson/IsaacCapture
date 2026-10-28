@@ -16,8 +16,11 @@ import time
 
 import pytest
 
-from sources import build_local_camera, set_notify_sink  # noqa: E402
-from sources.oden import _caps_field, _ycbcr_coefficients  # noqa: E402
+from isaaccapture_examples.camera_viz.sources import build_local_camera, set_notify_sink
+from isaaccapture_examples.camera_viz.sources.oden import (
+    _caps_field,
+    _ycbcr_coefficients,
+)
 
 
 def _to_rgb(colorimetry: str, y: int, cb: int, cr: int) -> tuple:
