@@ -24,12 +24,18 @@ licensed; the rest of Isaac Capture keeps its own licences.
 
 ## Getting started
 
-Oden needs a licence on each machine. Voysys Free is free for non-commercial use,
-with a renewable 7-day trial for commercial use:
-[sign up](https://portal.voysys.dev/signup).
+You need:
 
-Install the Oden Fleet Streamer (the Streamer with the OCP plugin) on the robot, a
-Jetson or an Ubuntu PC, and OdenVR on the workstation, Ubuntu with an NVIDIA GPU:
+- **Robot:** an NVIDIA Jetson or an Ubuntu PC, with Docker.
+- **Workstation:** Ubuntu 24.04 with an NVIDIA GPU, the CUDA toolkit
+  (`sudo apt install cuda-toolkit` from NVIDIA's repository) and Docker.
+- **An Oden licence for each machine.** Voysys Free is free for non-commercial use,
+  with a renewable 7-day trial for commercial use:
+  [sign up](https://portal.voysys.dev/signup).
+
+Install the Oden Fleet Streamer (the Streamer with the OCP plugin) on the robot and
+OdenVR on the workstation. The Fleet Streamer also connects to Voysys Fleet, where
+the operators of your Fleet organisation can see the robot.
 
 ```bash
 # robot
@@ -41,14 +47,31 @@ oden-vr --activate YOUR-ODENVR-KEY
 ```
 
 Stream the robot's cameras to OdenVR as in Oden's
-[first vehicle stream](https://docs.voysys.dev/start/first-vehicle-stream) guide,
-and enable the OCP plugin at both ends. In OdenVR, add a **CUDA IPC Texture
-Export** for each camera, with Share Path `/tmp/oden_0`. Then show it in
-camera_viz:
+[first vehicle stream](https://docs.voysys.dev/start/first-vehicle-stream) guide.
+The Streamer has OCP on; in OdenVR, tick the *Oden Control Pipeline* plugin. Then
+add a **CUDA IPC Texture Export** to OdenVR's project for each camera:
+
+- **Source:** the camera's stream (listed once video arrives).
+- **Share Path:** `/tmp/oden_0`, then `/tmp/oden_1` and so on.
+- **Share Width** and **Height:** 1280 and 720, as in camera_viz's `oden.yaml`.
+- Press **Start**, and save the project.
+
+From then on, run OdenVR without a window. A windowed OdenVR follows the screen:
+when the screen blanks, it slows to about one frame a second, and the robot stops
+taking commands. For 90 commands a second, add
+`use_idle_framerate_cap : true; idle_framerate_cap : 90.0;` at the top level of
+the project's `config`:
+
+```bash
+oden-vr --headless --project ~/robot.vproj
+```
+
+Then show the cameras in camera_viz. The first setup builds Isaac Capture from
+the checkout, with Isaac's build dependencies:
 
 ```bash
 git clone -b oden https://github.com/torkeldanielsson/IsaacCapture.git && cd IsaacCapture
-examples/camera_viz/camera_viz.sh setup
+examples/camera_viz/camera_viz.sh setup --build-from-source
 examples/camera_viz/camera_viz.sh run examples/camera_viz/configs/oden.yaml --mode window
 ```
 
@@ -64,9 +87,12 @@ docker run --rm --net=host --ipc=host -e ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
   --ros-args -p config:=/opt/teleop_oden/config/teleop_ros2.yaml
 ```
 
-Run Isaac's `teleop_ros2` as usual. Its topics appear on the robot, and the
-robot's `/joint_states` appear on the workstation. One YAML file lists what
-crosses, so your own topics can go too:
+Run Isaac's `teleop_ros2` with the same `-e ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST`
+as the bridges. Without it, its topics also reach the robot directly over the
+network, past every check below. Its topics then appear on the robot, and the
+robot's `/joint_states` on the workstation. Without a headset, `teleop_ros2` can
+replay recorded input; the [teleop_oden README](examples/teleop_oden/README.md#without-a-headset)
+shows how. One YAML file lists what crosses, so your own topics can go too:
 
 ```yaml
 to_robot:
@@ -89,8 +115,9 @@ picture quality and keeps the video current.
 
 **Every command is checked against the video it was based on.** The Streamer puts
 an authenticated time stamp in the video, and OdenVR returns it with the commands
-the operator gives while watching. The robot knows how old the operator's view was
-and drops any command that may be older than 500 ms.
+the operator gives while watching. The robot knows how long the loop from the
+camera to the command took, and drops the command when it took more than 500 ms,
+which allows about 200 ms each way.
 
 **Both ends know each other's health.** Every control message carries the health
 of the whole link. While any fault is active, the robot passes no commands.
@@ -101,6 +128,9 @@ so a lost message has no effect on later ones.
 **The robot has the last word.** Only topics in the robot's own config reach it, and
 its controllers keep their own limits and emergency stop.
 
+**A stopped bridge says nothing.** OCP keeps forwarding the last data a bridge
+wrote, so each bridge acts only on data from a peer that is still running.
+
 ## Measured
 
 A Jetson AGX Thor robot and an RTX 4070 workstation on an office network, Oden
@@ -109,10 +139,12 @@ nightly 0.26.1028 at both ends, and `teleop_ros2` replaying Isaac's recorded inp
 ![Command delay from Isaac to the robot: medians of 7–9 ms at 90 Hz](docs/oden/06-delay.png)
 
 - Commands reach the robot 7–9 ms after Isaac publishes them (median, OdenVR at
-  90 Hz).
+  90 Hz). With AGX Orin and Xavier NX robots, the median was 13–19 ms.
 - In controller mode, Isaac's topics add about 170 kbit/s to the uplink at 90 Hz.
+  With several links, each link carries all of it.
 - With 25 ms added each way and 1 % packet loss, delay rose by the 25 ms and
   nothing else changed.
+- With two links, losing either one changed nothing.
 - Stopping the operator side stopped commands within 10 ms, and OCP raised a fault
   within half a second.
 

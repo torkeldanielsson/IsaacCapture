@@ -252,7 +252,11 @@ class Bridge(Node):
                 "take; ignoring it",
             )
             return
-        if not gate(sample.key, sample.hold_ms):
+        # A latched sample holds until it is replaced, so how long ago it was
+        # published is no measure of its age; one held back is offered again.
+        if not gate(sample.key, 0 if spec.latched else sample.hold_ms):
+            if spec.latched:
+                self._inbox.release(sample.key)
             return
         try:
             msg = rebuild_topic(sample.schema, sample.values)

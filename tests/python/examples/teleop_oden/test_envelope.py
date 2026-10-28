@@ -35,6 +35,14 @@ def _box(budget=3700, channels=("/a",)):
     return out
 
 
+def _pair(budget=3700, channels=("/a",)):
+    """A sender and a receiver that has seen its session (a first envelope proves
+    nothing: OCP may be forwarding it from a stopped sender)."""
+    out, inbox = _box(budget, channels), Inbox()
+    assert inbox.accept(_wire(out.build(0, None))) == []
+    return out, inbox
+
+
 def _exchange(out: Outbox, inbox: Inbox, t_ns: int = 0):
     got = inbox.accept(_wire(out.build(t_ns, None)))
     out.peer_ack(_wire(inbox.ack()))
@@ -42,7 +50,7 @@ def _exchange(out: Outbox, inbox: Inbox, t_ns: int = 0):
 
 
 def test_samples_cross_once_and_schemas_until_acknowledged():
-    out, inbox = _box(), Inbox()
+    out, inbox = _pair()
     out.put("t:/a", _flat("/a", [1, 2.5]), 0)
 
     first = _wire(out.build(0, None))
@@ -63,7 +71,7 @@ def test_samples_cross_once_and_schemas_until_acknowledged():
 
 
 def test_every_sample_carries_its_values_in_full():
-    out, inbox = _box(), Inbox()
+    out, inbox = _pair()
     out.put("t:/a", _flat("/a", [1_000_000, 0.5, 7]), 0)
     _exchange(out, inbox)
     out.put("t:/a", _flat("/a", [1_000_003, 0.75, 7]), 0)
@@ -93,7 +101,7 @@ def test_each_envelope_decodes_with_the_schema_alone():
 
 
 def test_lost_envelopes_and_acks_never_affect_later_samples():
-    out, inbox = _box(), Inbox()
+    out, inbox = _pair()
     rng = random.Random(5)
     truth = {}
     out.put("t:/a", _flat("/a", [0, 0]), 0)
@@ -116,7 +124,7 @@ def test_lost_envelopes_and_acks_never_affect_later_samples():
 
 
 def test_samples_follow_the_ack_across_sequence_wrap():
-    out, inbox = _box(), Inbox()
+    out, inbox = _pair()
     for i in range(70_000):
         out.put("t:/a", _flat("/a", [i]), 0)
         if i % 1000 == 0 or i > 69_990:
@@ -129,11 +137,38 @@ def test_new_session_resets_the_receiver():
     for _ in range(2):
         out = _box()
         out.put("t:/a", _flat("/a", [5]), 0)
+        assert inbox.accept(_wire(out.build(0, None))) == []
         assert len(inbox.accept(_wire(out.build(0, None)))) == 1
 
 
+def test_a_stopped_sender_s_last_envelope_is_never_delivered():
+    out = _box()
+    out.put("t:/a", _flat("/a", [5]), 0)
+    _ = out.build(0, None)
+    last = _wire(out.build(0, None))
+    # The sender stops; OCP keeps forwarding its last envelope. A receiver that
+    # starts now, or one that already had the session, gets nothing from it.
+    fresh = Inbox()
+    assert all(fresh.accept(last) == [] for _ in range(100))
+    out2, running = _pair()
+    out2.put("t:/a", _flat("/a", [6]), 0)
+    env = _wire(out2.build(0, None))
+    assert [r.values for r in running.accept(env)] == [[6]]
+    assert all(running.accept(env) == [] for _ in range(100))
+
+
+def test_a_released_sample_is_offered_again():
+    out, inbox = _pair()
+    out.put("t:/a", _flat("/a", [5]), 0)
+    assert [r.values for r in _exchange(out, inbox)] == [[5]]
+    assert "s" not in out.build(0, None)
+    inbox.release("t:/a")
+    out.peer_ack(_wire(inbox.ack()))
+    assert [r.values for r in inbox.accept(_wire(out.build(0, None)))] == [[5]]
+
+
 def test_receiver_restart_resends_the_schema():
-    out, inbox = _box(), Inbox()
+    out, inbox = _pair()
     out.put("t:/a", _flat("/a", [5]), 0)
     _exchange(out, inbox)
     fresh = Inbox()
@@ -146,7 +181,7 @@ def test_receiver_restart_resends_the_schema():
 
 
 def test_sample_without_its_schema_waits():
-    out, inbox = _box(), Inbox()
+    out, inbox = _pair()
     out.put("t:/a", _flat("/a", [1]), 0)
     env = _wire(out.build(0, None))
     del env["c"]
@@ -155,7 +190,7 @@ def test_sample_without_its_schema_waits():
 
 
 def test_schema_change_is_resent():
-    out, inbox = _box(), Inbox()
+    out, inbox = _pair()
     out.put("t:/a", _flat("/a", [1, 2]), 0)
     _exchange(out, inbox)
     out.put("t:/a", _flat("/a", [1, 2, 3], names=("a", "c")), 0)
@@ -195,7 +230,7 @@ def test_budget_holds_and_earlier_channels_win():
 
 
 def test_a_big_schema_behind_full_channels_still_gets_through():
-    out, inbox = _box(600, ("/small", "/big")), Inbox()
+    out, inbox = _pair(600, ("/small", "/big"))
     delivered = set()
     for t in range(6):
         out.put("t:/small", _flat("/small", [0.1 * i for i in range(40)]), 0)
@@ -266,6 +301,7 @@ def test_json_size_is_the_compact_encoding():
 def test_max_rate_holds_samples_back_but_the_newest_gets_through():
     out, inbox = Outbox(3700, 15000), Inbox()
     out.add_channel("t:/a", (0, 0, 0), max_rate_hz=10)
+    inbox.accept(_wire(out.build(0, None)))
     delivered = []
     for i in range(30):  # 100 Hz for 0.3 s
         out.put("t:/a", _flat("/a", [i]), i * 10 * MS)
@@ -284,7 +320,7 @@ def test_zero_runs_squeeze_and_expand():
 
 
 def test_a_run_of_zeros_in_a_sample_costs_two_bytes():
-    out, inbox = _box(), Inbox()
+    out, inbox = _pair()
     values = [5] + [0] * 199 + [7]
     out.put("t:/a", _flat("/a", values), 0)
     env = _wire(out.build(0, None))
@@ -293,7 +329,7 @@ def test_a_run_of_zeros_in_a_sample_costs_two_bytes():
 
 
 def test_switching_back_to_an_earlier_schema_is_acknowledged():
-    out, inbox = _box(), Inbox()
+    out, inbox = _pair()
     for names in (("a", "b"), ("a", "c"), ("a", "b")):
         for i in range(3):
             out.put("t:/a", _flat("/a", [i], names=names), 0)

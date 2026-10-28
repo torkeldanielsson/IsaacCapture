@@ -27,6 +27,7 @@ rclpy = pytest.importorskip("rclpy")
 from geometry_msgs.msg import PoseStamped  # noqa: E402
 from rclpy.executors import SingleThreadedExecutor  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy  # noqa: E402
 from sensor_msgs.msg import JointState  # noqa: E402
 from std_msgs.msg import String  # noqa: E402
 
@@ -209,8 +210,12 @@ class _Side:
         self.executor.add_node(self.node)
         self._thread = threading.Thread(target=self.executor.spin, daemon=True)
         self._thread.start()
+        self._closed = False
 
     def close(self):
+        if self._closed:
+            return
+        self._closed = True
         self.executor.shutdown()
         self.bridge.destroy_node()
         self.node.destroy_node()
@@ -233,6 +238,7 @@ def rig(tmp_path, request):
         "to_robot:\n"
         "  - {topic: /cmd, type: geometry_msgs/msg/PoseStamped, precision: 0.0001}\n"
         "  - {topic: '/disc/*'}\n"
+        "  - {topic: /static, type: std_msgs/msg/String, latched: true}\n"
         "to_operator:\n"
         "  - {topic: /joint_states, type: sensor_msgs/msg/JointState}\n"
         "zmq:\n"
@@ -255,10 +261,13 @@ def rig(tmp_path, request):
         robot=robot,
         zmq_source=zmq_source,
         zmq_sink=zmq_sink,
+        domain=domain,
+        common=common,
+        max_age_ms=max_age_ms,
     )
     yield rig
-    operator.close()
-    robot.close()
+    rig.operator.close()
+    rig.robot.close()
     ocp.close()
 
 
@@ -308,23 +317,74 @@ def test_commands_reach_the_robot_with_stamps_as_sent(rig):
     assert not any(k.endswith("dropped_too_old") for k in counts)
 
 
+def _joint_state(i):
+    msg = JointState()
+    msg.header.stamp.sec, msg.header.stamp.nanosec = divmod(time.time_ns(), NS)
+    msg.name = ["j0", "j1"]
+    msg.position = [float(i), 0.5]
+    return msg
+
+
 def test_robot_state_reaches_the_operator(rig):
     got = _collect(rig.operator, JointState, "/joint_states")
-
-    def joint_state(i):
-        msg = JointState()
-        msg.header.stamp.sec, msg.header.stamp.nanosec = divmod(time.time_ns(), NS)
-        msg.name = ["j0", "j1"]
-        msg.position = [float(i), 0.5]
-        return msg
-
-    sent = _drive(rig.robot, "/joint_states", joint_state, seconds=3)
+    sent = _drive(rig.robot, "/joint_states", _joint_state, seconds=3)
     time.sleep(0.5)
     assert len(got) > 20, len(got)
     for _, m in got:
         original = sent[int(m.position[0])]
         assert m.header == original.header
         assert list(m.name) == ["j0", "j1"] and m.position[1] == 0.5
+
+
+def test_a_stopped_robot_bridge_s_last_state_is_not_republished(rig):
+    # A robot bridge runs while no operator bridge does, so nothing acknowledges
+    # its state, and stops. OCP keeps forwarding its last data, which holds that
+    # state in full.
+    rig.operator.close()
+    rig.robot.close()
+    rig.robot = _Side(
+        rig.domain + 2,
+        RobotBridge,
+        {**rig.common, "ocp_port": rig.ocp.robot.port, "max_age_ms": rig.max_age_ms},
+    )
+    _drive(rig.robot, "/joint_states", _joint_state, seconds=1)
+    time.sleep(0.2)
+    rig.robot.close()
+    time.sleep(0.5)  # what was on its way has arrived
+    # An operator bridge that starts now must not publish it as the robot's state.
+    rig.operator = _Side(
+        rig.domain + 3,
+        OperatorBridge,
+        {**rig.common, "ocp_port": rig.ocp.operator.port},
+    )
+    time.sleep(1.5)
+    counts = rig.operator.bridge._counts
+    assert counts["t:/joint_states:published"] == 0, dict(counts)
+
+
+def test_a_latched_topic_reaches_a_robot_bridge_that_starts_later(rig):
+    qos = QoSProfile(
+        depth=1,
+        reliability=ReliabilityPolicy.RELIABLE,
+        durability=DurabilityPolicy.TRANSIENT_LOCAL,
+    )
+    pub = rig.operator.node.create_publisher(String, "/static", qos)
+    pub.publish(String(data="frames"))
+    rig.robot.close()
+    time.sleep(1.5)  # far longer ago than max_age_ms when the robot comes
+    rig.robot = _Side(
+        rig.domain + 4,
+        RobotBridge,
+        {**rig.common, "ocp_port": rig.ocp.robot.port, "max_age_ms": rig.max_age_ms},
+    )
+    got = []
+    rig.robot.node.create_subscription(
+        String, "/static", lambda m: got.append(m.data), qos
+    )
+    deadline = time.monotonic() + 4
+    while not got and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert got == ["frames"]
 
 
 def test_ocp_fault_stops_commands(rig):

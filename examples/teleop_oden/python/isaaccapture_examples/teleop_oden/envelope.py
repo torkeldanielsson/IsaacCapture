@@ -9,10 +9,16 @@ envelope carries the newest sample of every channel until the receiver
 acknowledges it. Each sample is complete in itself: its values are absolute, so
 decoding it needs only its schema, and a lost envelope never affects a later
 one. A schema (the names) goes once, until the receiver acknowledges it. Within
-a sample, a run of three or more zeros goes as ``null, count``. Fields::
+a sample, a run of three or more zeros goes as ``null, count``.
+
+OCP keeps forwarding the last envelope a bridge wrote after that bridge has
+stopped, so a receiver delivers samples only from an envelope whose build count
+moved on from the one before: the sender is alive and the samples are its
+newest. A receiver that has just started waits one envelope. Fields::
 
     v    format version
     id   sender session id (new on every start)
+    n    the sender's envelope count, modulo 2^16
     c    [[schema number, schema], ...]          schemas the receiver lacks
     s    [[schema number, seq, hold_ms, value, ...], ...]
          seq counts the channel's samples modulo 2^16; hold_ms is how long the
@@ -31,7 +37,7 @@ from dataclasses import dataclass
 
 from .codec import Flat, channel_key
 
-VERSION = 3
+VERSION = 4
 MAX_SCHEMAS = 1024
 _SEQ = 0xFFFF
 
@@ -156,6 +162,7 @@ class Outbox:
         self._schemas: dict[int, dict] = {}
         self._next_number = 1
         self._peer: dict[str, tuple[int, int | None]] = {}
+        self._built = 0
 
     def add_channel(
         self, key: str, priority: tuple, max_rate_hz: float | None = None
@@ -228,7 +235,8 @@ class Outbox:
         return entry, _head(len(entry)) + sum(cbor_size(v) for v in head) + size
 
     def build(self, now_ns: int, ack: list | None) -> dict:
-        env: dict = {"v": VERSION, "id": self.session_id}
+        self._built = (self._built + 1) & _SEQ
+        env: dict = {"v": VERSION, "id": self.session_id, "n": self._built}
         if ack:
             env["a"] = ack
         # Keys and array heads of "c" and "s", then a separator per entry below.
@@ -305,6 +313,7 @@ class Inbox:
     def __init__(self):
         self.peer_sid: int | None = None
         self.missing_schema: Counter[str] = Counter()
+        self._last_n: int | None = None
         self._reset()
 
     def _reset(self) -> None:
@@ -321,17 +330,27 @@ class Inbox:
                 out += [held.schema_number, held.seq if same else None]
         return out
 
+    def release(self, key: str) -> None:
+        """Stop acknowledging the channel's sample, so the sender offers it again."""
+        held = self._held.get(key)
+        if held is not None:
+            held.sample_number = held.seq = None
+
     def accept(self, env: dict) -> list[Received]:
         """The envelope's samples this side does not hold yet.
 
         OCP repeats its newest message until the next one, so most envelopes are
-        repeats; a repeat yields nothing.
+        repeats; a repeat yields nothing. Nor does the first envelope seen of a
+        sender session: it may be one OCP still forwards from a stopped sender.
         """
         if env.get("v") != VERSION:
             raise ValueError(f"unsupported envelope version {env.get('v')!r}")
+        n = env["n"]
+        fresh = env["id"] == self.peer_sid and n != self._last_n
         if env["id"] != self.peer_sid:
             self.peer_sid = env["id"]
             self._reset()
+        self._last_n = n
         for number, schema in env.get("c", ()):
             if number not in self._schemas:
                 self._schemas[number] = schema
@@ -341,6 +360,8 @@ class Inbox:
         while len(self._schemas) > MAX_SCHEMAS:
             self._schemas.popitem(last=False)
         out = []
+        if not fresh:
+            return out
         for entry in env.get("s", ()):
             number, seq, hold_ms = entry[:3]
             values = expand(entry[3:])

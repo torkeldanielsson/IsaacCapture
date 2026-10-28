@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # SPDX-FileCopyrightText: Copyright (c) 2026 Voysys AB
 # SPDX-License-Identifier: MIT
 
@@ -33,13 +32,12 @@ COPY examples/teleop_oden/config config
 COPY tests/python/examples/teleop_oden tests
 ENV PYTHONPATH=/opt/teleop_oden/python
 
-COPY --chmod=755 <<'EOF' /usr/local/bin/teleop-oden-entrypoint
-#!/bin/bash
-set -e
-source "/opt/ros/${ROS_DISTRO}/setup.bash"
-source /opt/teleop_oden/install/setup.bash
-exec "$@"
-EOF
+# Written with printf, so the image also builds without BuildKit (Ubuntu's docker.io).
+RUN printf '%s\n' '#!/bin/bash' 'set -e' \
+    "source /opt/ros/${ROS_DISTRO}/setup.bash" \
+    'source /opt/teleop_oden/install/setup.bash' 'exec "$@"' \
+    > /usr/local/bin/teleop-oden-entrypoint \
+    && chmod 755 /usr/local/bin/teleop-oden-entrypoint
 
 ENTRYPOINT ["/usr/local/bin/teleop-oden-entrypoint"]
 CMD ["python3", "-m", "isaaccapture_examples.teleop_oden.robot_bridge", \

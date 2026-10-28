@@ -70,6 +70,12 @@ one. Floats cross as whole multiples of the topic's `precision` when it has one,
 and a run of three or more zeros shrinks to two bytes. OCP stores all of it as
 CBOR.
 
+OCP keeps forwarding the last data a bridge wrote after the bridge stops. Each
+control message therefore carries a count that moves on with every message the
+bridge writes, and the other end acts only on messages whose count moved: a
+stopped bridge's last data is never published. A bridge that has just started
+waits one message.
+
 Message stamps cross exactly as they were sent.
 
 `/oden_teleop/status` (`diagnostic_msgs/DiagnosticArray`) on both ends reports the
@@ -91,6 +97,8 @@ Every check runs on the robot:
   total may exceed `max_age_ms` (default 500, OCP's own latency limit).
 - Each topic keeps only its newest sample, and each sample is published once, so a
   stalled link never replays a backlog.
+- Latched topics hold until they are replaced, so the age check leaves out how long
+  ago they were published; one held back by a fault is offered again.
 - When the operator's data stops, nothing more is published, so robot-side
   timeouts work as they do on a local network. OCP raises a fault within half a
   second of losing the operator bridge, the Player or the link.
@@ -101,11 +109,17 @@ The robot's own controllers keep their limits, interlocks and emergency stop.
 
 Both machines run Oden 0.26 or later with the OCP plugin (`libocp.so`) next to the
 application. The `oden-vr` and `oden-fleet-streamer` packages ship it; with plain
-`oden-streamer`, copy it from `oden-fleet-streamer` of the same version. The Player
-starts with OCP off: set `disabled : false;` in
-`~/.config/oden/OdenVR/libocp_2de7c4c4-8cb6-48f1-a59d-bc3007d9df22.conf`.
+`oden-streamer`, copy it from `oden-fleet-streamer` of the same version. The
+Streamer starts with OCP on, the Player with OCP off: tick the *Oden Control
+Pipeline* plugin in OdenVR, or set `disabled : false;` in
+`/var/lib/oden/OdenVR/libocp_2de7c4c4-8cb6-48f1-a59d-bc3007d9df22.conf`.
 
-Build the bridge image on each machine from the repository root:
+Run OdenVR headless (`oden-vr --headless --project PROJECT`). A windowed OdenVR
+follows the screen, and slows to about one frame a second when the screen blanks;
+OCP then stops the commands.
+
+Build the bridge image on each machine from the repository root. On a Jetson whose
+kernel lacks iptables' `raw` table, add `--network=host`:
 
 ```bash
 docker build -f examples/teleop_oden/Dockerfile -t teleop_oden .
@@ -129,16 +143,43 @@ docker run --rm --net=host --ipc=host -e ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 To carry other topics, mount a config of your own (`-v $PWD/my.yaml:/my.yaml`,
 `-p config:=/my.yaml`).
 
+Start `teleop_ros2` with the same discovery setting, or its topics reach the robot
+directly over the network, past the robot's checks.
+
+### Without a headset
+
+`teleop_ros2` replays recorded input. Isaac's reference image (about 12 GB) holds
+a generator for a recording; the second argument is its length in frames, 60 a
+second (36000 is ten minutes):
+
+```bash
+docker build -f examples/teleop_ros2/Dockerfile -t teleop_ros2_ref .
+mkdir -p mcap
+docker run --rm --entrypoint bash -v $PWD/mcap:/mcap teleop_ros2_ref -c \
+  "source /usr/local/bin/teleop-env-setup && /opt/isaaccapture/install/examples/teleop_ros2/cpp/integration_tests/teleop_ros2_mcap_generator /mcap/fixture.mcap 36000"
+docker run --rm --net=host --ipc=host -e ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST \
+  -v $PWD/mcap:/mcap teleop_ros2_ref \
+  --ros-args -p mode:=controller_teleop -p mcap_replay_path:=/mcap/fixture.mcap
+```
+
+On the robot, anything that publishes `/joint_states` stands in for the robot.
+
 ## Limits
 
 - Commands cross once per Player frame, and OCP skips a frame that comes less than
-  10 ms after the last one: 30 times a second for a headless Player by default, about
-  75 with `use_idle_framerate_cap : true; idle_framerate_cap : 90.0;` in the project.
+  10 ms after the last one: 30 times a second for a headless Player by default,
+  75–95 with `use_idle_framerate_cap : true; idle_framerate_cap : 90.0;` at the top
+  level of the project's `config`.
   A cap of 100 Hz halves the rate.
 - The Streamer's OCP reads at most 4 KiB per control message; `budget_bytes` keeps
   the user data under it.
 - Strings travel in the schema, so a topic whose strings change on every message
   resends its schema every time.
+- `to_operator` topics cross once per Streamer frame, so at the camera's frame rate.
+- Without a `precision`, a float can differ from the sender's in its last bit.
+- With several Oden links, every link carries the full control data and video.
+- While the video stops, camera_viz shows the last frame; it picks the video up
+  again about 2 s after it returns.
 
 ## Measured
 
@@ -159,6 +200,9 @@ sends about 137 kbit/s with the Player at 90 Hz and 59 kbit/s at 30 Hz.
 | hand_teleop, Player 30 Hz | 19–21 / 35–36 / 44 ms | 113 kbit/s |
 | hand_teleop, 25 ms added each way, 1 % loss | 34 / 45–47 / 59 ms | 299 kbit/s |
 | vehicle_teleop ZMQ commands to the Panda worker | 6 / 11 / 18 ms | about 38 kbit/s of user data |
+
+With Jetson AGX Orin and Xavier NX robots, the median delay at 90 Hz was 13–19 ms.
+Losing one of two links changed nothing.
 
 Every value delivered on the robot equalled the workstation's on the 0.0001 grid,
 and every stamp was unchanged (`/tf` crosses merged per frame). Every message
