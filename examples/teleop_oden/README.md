@@ -142,27 +142,27 @@ To carry other topics, mount a config of your own (`-v $PWD/my.yaml:/my.yaml`,
 
 ## Measured
 
-2026-10-27, office LAN, Jetson AGX Thor robot (Oden Streamer nightly 0.26.1027)
-and an RTX 4070 workstation (Oden Player), teleop_ros2 replaying its MCAP fixture
-with this directory's config, video crossing the same link. Delay is from the
-teleop_ros2 publish to delivery on the robot. Uplink is everything the workstation
-sent the robot, counted by the firewall: Oden alone sends about 135 kbit/s with the
-Player at 90 Hz and 50 kbit/s at 30 Hz.
+2026-10-28, office LAN, Jetson AGX Thor robot (Oden Fleet Streamer nightly
+0.26.1028) and an RTX 4070 workstation (Oden Player 0.26.1028), teleop_ros2
+replaying its MCAP fixture with this directory's config, video crossing the same
+link. Delay is from the teleop_ros2 publish to delivery on the robot. Uplink is
+everything the workstation sent the robot, counted by the firewall: Oden alone
+sends about 137 kbit/s with the Player at 90 Hz and 59 kbit/s at 30 Hz.
 
 | Case | Delay p50 / p95 / max | Uplink |
 |---|---|---|
-| controller_teleop, Player 90 Hz | 6–8 / 13–16 / 25 ms | 243 kbit/s |
-| hand_teleop, Player 90 Hz | 7–8 / 19–21 / 26 ms | 256 kbit/s |
-| full_body, Player 90 Hz | 7–8 / 15–16 / 23 ms | 217 kbit/s |
-| hand_teleop plus `/xr_teleop/hand` and `/tf` | 7–12 / 19–24 / 32 ms | 305 kbit/s |
-| controller_teleop, Player 30 Hz | 12–13 / 26–27 / 32 ms | 91 kbit/s |
-| hand_teleop, Player 30 Hz | 16–18 / 34–36 / 47 ms | 98 kbit/s |
-| hand_teleop, 25 ms added each way, 1 % loss | 32–34 / 44–46 / 54 ms | 253 kbit/s |
-| vehicle_teleop ZMQ commands to the Panda worker | 5 / 9 / 22 ms | about 30 kbit/s of user data |
+| controller_teleop, Player 90 Hz | 7–8 / 15–16 / 25 ms | 341 kbit/s |
+| hand_teleop, Player 90 Hz | 8 / 17–19 / 30 ms | 299 kbit/s |
+| full_body, Player 90 Hz | 9 / 16–17 / 23 ms | 385 kbit/s |
+| hand_teleop plus `/xr_teleop/hand` and `/tf` | 8–10 / 18–23 / 31 ms | 617 kbit/s |
+| controller_teleop, Player 30 Hz | 15 / 28 / 34 ms | 125 kbit/s |
+| hand_teleop, Player 30 Hz | 19–21 / 35–36 / 44 ms | 113 kbit/s |
+| hand_teleop, 25 ms added each way, 1 % loss | 34 / 45–47 / 59 ms | 299 kbit/s |
+| vehicle_teleop ZMQ commands to the Panda worker | 6 / 11 / 18 ms | about 38 kbit/s of user data |
 
 Every value delivered on the robot equalled the workstation's on the 0.0001 grid,
-and every stamp was unchanged (`/tf` crosses merged per frame). The fixture moves
-little, so most of its values do not change between frames; tracking data where
-most values change every frame costs up to about twice the user data. Stopping
-the operator bridge or killing the Player stopped delivery at once and raised an
-OCP fault within 0.5 s; delivery resumed 1.0 s after the Player restarted.
+and every stamp was unchanged (`/tf` crosses merged per frame). Every message
+carries full values, so a topic costs the same whether its values move or not.
+Stopping the operator bridge or killing the Player stopped delivery at once and
+raised an OCP fault within 0.5 s; delivery resumed 1.3 s after the Player
+restarted.
